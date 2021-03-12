@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct Config {
     #[serde(default)]
     pub debug: bool,

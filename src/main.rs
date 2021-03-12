@@ -1,4 +1,6 @@
 #[macro_use]
+extern crate anyhow;
+#[macro_use]
 extern crate log;
 #[macro_use]
 extern crate serde;
@@ -7,8 +9,10 @@ extern crate serde_repr;
 
 mod config;
 mod db;
+mod git;
 mod osuapi;
 mod scrape;
+mod web;
 
 use std::fs::File;
 use std::io::Read;
@@ -35,9 +39,9 @@ async fn main() -> Result<()> {
     file.read_to_end(&mut contents)?;
     let config: Config = toml::from_slice(&contents)?;
 
-    let osuapi = Osuapi::new(config);
+    let osuapi = Osuapi::new(config.clone());
 
-    let mut scraper = Scraper::new(osuapi.clone());
+    let mut scraper = Scraper::new(osuapi.clone(), config.clone());
     tokio::spawn(async move {
         scraper.main_loop().await.unwrap();
     });

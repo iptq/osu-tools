@@ -1,6 +1,7 @@
 mod beatmaps;
 pub mod models;
 
+use std::mem;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
@@ -9,10 +10,9 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use futures::future::Future;
-use parking_lot::RwLock;
 use reqwest::{header::HeaderName, Client, Method};
 use serde::ser::Serialize;
-use tokio::sync::Semaphore;
+use tokio::sync::{RwLock, Semaphore};
 
 use crate::config::Config;
 
@@ -24,7 +24,7 @@ pub struct Osuapi {
     http_client: Arc<Client>,
     lock: Arc<Semaphore>,
     config: Arc<Config>,
-    is_fetching_token: Arc<AtomicBool>,
+    is_fetching_token: Arc<Semaphore>,
     token: Arc<RwLock<Option<(Instant, OsuToken)>>>,
 }
 
@@ -37,7 +37,7 @@ impl Osuapi {
             http_client: Arc::new(Client::new()),
             lock: Arc::new(lock),
             config: Arc::new(config),
-            is_fetching_token: Arc::new(AtomicBool::new(false)),
+            is_fetching_token: Arc::new(Semaphore::new(1)),
             token: Arc::new(RwLock::new(None)),
         }
     }
@@ -45,12 +45,12 @@ impl Osuapi {
     /// Returns the token if it exists, or else fetches a new one
     pub async fn fetch_token(&self) -> Result<OsuToken> {
         // if it's fetching, let the current fetch complete first, it may finish faster
-        self.is_fetching_token
-            .compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed);
+        let permit = self.is_fetching_token.acquire().await?;
 
+        // check the currently stored value for the token
         {
             let mut expired = false;
-            if let Some((instant, token)) = self.token.read().as_ref() {
+            if let Some((instant, token)) = self.token.read().await.as_ref() {
                 // quickly check expiry time
                 let mut expires = instant.clone();
                 expires += Duration::from_secs(token.expires_in);
@@ -61,8 +61,9 @@ impl Osuapi {
                 }
             }
 
+            // if it's expired, "take" the current token out and store a new one
             if expired {
-                self.token.write().take();
+                self.token.write().await.take();
             }
         }
 
@@ -76,43 +77,23 @@ impl Osuapi {
         let req = self
             .http_client
             .request(Method::POST, TOKEN_ENDPOINT)
-            .header("content-type", "application/x-www-form-urlencoded")
-            .form(&form)
+            .header("content-type", "application/json")
+            .json(&form)
             .build()?;
-        debug!("request: {:?}", req);
-        debug!(
-            "request body: {:?}",
-            req.body()
-                .and_then(|s| s.as_bytes())
-                .map(|s| std::str::from_utf8(s))
-        );
 
         let res = self.http_client.execute(req).await?;
         let token: OsuToken = res.json().await?;
 
         {
-            let mut token_ref = self.token.write();
+            let mut token_ref = self.token.write().await;
             *token_ref = Some((now, token.clone()));
         }
 
+        // release the lock on the token
+        mem::drop(permit);
+
         Ok(token)
     }
-
-    // /// guard that locks requests to make sure it's under request limit
-    // async fn request<F, R, Fut>(&self, f: F) -> Result<R>
-    // where
-    //     F: Fn(Arc<Client>) -> Fut,
-    //     Fut: Future<Output = R>,
-    // {
-    //     let token = self.fetch_token();
-
-    //     // TODO: try_acquire with exponential backoff?
-    //     self.lock.acquire().await?;
-
-    //     let res = f(self.http_client.clone()).await;
-
-    //     Ok(res)
-    // }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -124,7 +105,7 @@ struct TokenRequest<'a> {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-struct OsuToken {
+pub struct OsuToken {
     token_type: String,
     expires_in: u64,
     access_token: String,
