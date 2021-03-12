@@ -1,15 +1,10 @@
-use std::io::{Seek, SeekFrom};
-use std::mem;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Duration, Utc};
-use chrono_humanize::HumanTime;
 use futures::future;
 use git2::{IndexAddOption, Signature, Time};
-use tempfile::{NamedTempFile, TempDir, TempPath};
 use tokio::{fs::File, io, time};
-use zip::ZipArchive;
 
 use crate::config::Config;
 use crate::git::GitHost;

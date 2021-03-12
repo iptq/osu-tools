@@ -59,9 +59,7 @@ async fn main() -> Result<()> {
         scraper.main_loop().await.unwrap();
     });
 
-    tokio::spawn(async move {
-        web::run_web(config.clone());
-    });
+    web::run_web(config.clone()).await.unwrap();
 
     exit_rx.await?;
     Ok(())
