@@ -1,0 +1,25 @@
+on: [push]
+
+name: build-deb
+
+jobs:
+  run_tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v2
+
+      - name: rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: build-deb
+        run: |
+          cargo install cargo-deb
+          cargo deb
+
+      - uses: actions/upload-artifact@v2
+        with:
+          name: osu-tools.deb
+          path: target/debian/osu-tools*.deb
